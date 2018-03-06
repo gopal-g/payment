@@ -3,11 +3,15 @@
 namespace Appnings\Payment\Gateways;
 
 //here is the source code for encrypting the request
+use GuzzleHttp\Exception\BadResponseException;
+use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Appnings\Payment\Exceptions\PaymentGatewayException;
+use Mockery\Exception;
 
 
 class CCAvenueGateway implements PaymentGatewayInterface
@@ -18,8 +22,15 @@ class CCAvenueGateway implements PaymentGatewayInterface
     protected $testMode = false;
     protected $workingKey = '';
     protected $accessCode = '';
-    protected $liveEndPoint = 'https://secure.ccavenue.com/transaction/transaction.do?command=initiateTransaction';
-    protected $testEndPoint = 'https://test.ccavenue.com/transaction/transaction.do?command=initiateTransaction';
+    protected $liveEndPoint = 'https://secure.ccavenue.com/transaction/transaction.do?command=';
+    protected $testEndPoint = 'https://test.ccavenue.com/transaction/transaction.do?command=';
+
+    //as per documentation issued by ccavenue on 10-02-2017 API VER 1.1
+    protected $apiLiveEndPoint = 'https://api.ccavenue.com/apis/servlet/DoWebTrans?';
+    protected $apiTestEndPoint = 'https://apitest.ccavenue.com/apis/servlet/DoWebTrans?';
+    protected $apiVersion = '1.1';
+    protected $apiRequestType = 'JSON';
+
     public $response = '';
 
     public function __construct()
@@ -39,6 +50,28 @@ class CCAvenueGateway implements PaymentGatewayInterface
         return $this->testMode ? $this->testEndPoint : $this->liveEndPoint;
     }
 
+    public function getAPIEndPoint()
+    {
+        return $this->testMode ? $this->apiTestEndPoint : $this->apiLiveEndPoint;
+    }
+
+    public function initializeApiRequest($testEndpoint = '', $liveEndpoint = '', $apiVersion = '1.1')
+    {
+        if ($liveEndpoint) {
+            $this->apiLiveEndPoint = $liveEndpoint;
+        }
+
+        if ($testEndpoint) {
+            $this->apiTestEndPoint = $testEndpoint;
+        }
+
+        if ($apiVersion) {
+            $this->apiVersion = $apiVersion;
+        }
+
+        return $this;
+    }
+
     public function request($parameters)
     {
         $this->parameters = array_merge($this->parameters, $parameters);
@@ -55,6 +88,7 @@ class CCAvenueGateway implements PaymentGatewayInterface
     }
 
     /**
+     * Function to initiate transaction
      * @return mixed
      */
     public function send()
@@ -64,7 +98,7 @@ class CCAvenueGateway implements PaymentGatewayInterface
         return View::make('vendor.payment.ccavenue')
             ->with('encRequest', $this->encRequest)
             ->with('accessCode', $this->accessCode)
-            ->with('endPoint', $this->getEndPoint());
+            ->with('endPoint', $this->getEndPoint() . "initiateTransaction");
     }
 
     /**
@@ -74,6 +108,8 @@ class CCAvenueGateway implements PaymentGatewayInterface
      */
     public function response($request)
     {
+//        dd($request->all());
+
         $encResponse = $request->encResp;
 
         $rcvdString = $this->decrypt($encResponse, $this->workingKey);
@@ -168,5 +204,92 @@ class CCAvenueGateway implements PaymentGatewayInterface
             $count += 2;
         }
         return $binString;
+    }
+
+    /**
+     * Function to check the status of the given order number
+     * @param $order_number Order number for which the status needs to be checked!
+     * @param int $transaction_id transaction reference by ccavenue for which the status needs to be checked!
+     */
+    public function getOrderDetails($order_number, $transaction_id = 0)
+    {
+        $merchant_data = [];
+
+        $response_string = '';
+
+        $order_data = [];
+
+        if ($transaction_id) {
+            $merchant_data['reference_no'] = $transaction_id;
+        } else if ($order_number) {
+            $merchant_data['order_no'] = $order_number;
+        }
+
+
+        if ($merchant_data) {
+
+            $encRequest = $this->encrypt(json_encode($merchant_data), env('CCAVENUE_WORKING_KEY'));
+
+            $client = new \GuzzleHttp\Client();
+
+            $order_status_params = [
+                'enc_request' => $encRequest,
+                'access_code' => env('CCAVENUE_ACCESS_CODE'),
+                'command' => 'orderStatusTracker',
+                'request_type' => "JSON",
+                'version' => "1.1"
+            ];
+
+            $request_parameters = http_build_query($order_status_params);
+
+            try {
+
+                //making request to to CCAvenue server with the prepared parameters
+                $response_string = $client->post($this->getAPIEndPoint() . $request_parameters);
+
+                //ccavenue reseponsds with a serialized url response which should be parsed
+                parse_str($response_string->getBody()->getContents(), $order_data);
+
+                return $this->getOrderStatus($order_data);
+
+
+            } catch (BadResponseException $e) {
+                dd("Error occured" . $e->getMessage());
+
+            } catch (ConnectException $e) { // Wrong URL pinged or server not responding
+                dd("Error occured" . $e->getMessage());
+
+            } catch (ClientException $e) { // URL Response error
+                dd("Error occured" . $e->getMessage());
+
+            }
+
+            return false;
+        }
+
+    }
+
+
+    /**
+     * @param array $parsedData
+     */
+    private function getOrderStatus($parsedData = [])
+    {
+
+        try {
+
+            $decrypted_response = $this->decrypt(str_replace(["\n", "\r"], '', $parsedData['enc_response']), $this->workingKey);
+
+        } catch (Exception $e) {
+
+            infoPlus(["Exception while decrepting the enc_response", $e]);
+
+            return false;
+
+        }
+
+        $order = json_decode($decrypted_response, TRUE);
+
+        return $order;
     }
 }

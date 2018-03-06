@@ -42,8 +42,8 @@ class PaymentServiceProvider extends ServiceProvider
     {
         $this->publishes([
             __DIR__ . '/Config/config.php' => base_path('config/payment.php'),
-            __DIR__ . '/views/middleware.blade.php' => base_path('app/Http/Middleware/VerifyCsrfMiddleware.php'),
-            __DIR__ . '/views/ccavenue.blade.php' => resource_path('views/vendor/payment/ccavenue.blade.php'),
+            __DIR__ . '/Views/middleware.blade.php' => base_path('app/Http/Middleware/VerifyCsrfMiddleware.php'),
+            __DIR__ . '/Views/ccavenue.blade.php' => resource_path('views/vendor/payment/ccavenue.blade.php'),
         ]);
 
         $this->loadViewsFrom(__DIR__ . '/views', 'payment');

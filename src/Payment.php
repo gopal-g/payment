@@ -51,4 +51,9 @@ class Payment
         return $this;
     }
 
+    public function getOrderDetails($parameters)
+    {
+        return $this->gateway->getOrderDetails($parameters);
+    }
+
 }
