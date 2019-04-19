@@ -1,3 +1,6 @@
+# This project is no more under further development, You are welcome to take this forward if interested. Thank you.
+
+
 # CCAvenue Payment Gateway integration for Laravel 5.x (Supports PHP 7.1)
 
 [![Latest Version on Packagist][ico-version]][link-packagist]
